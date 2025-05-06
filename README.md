@@ -15,3 +15,5 @@ Technology Stack:
 whatweb -v target.com > whatweb.txt
 Search engine: shodan
 Wayback machine:
+------------------------------------------------------------------
+Tham khảo cài đặt Crew AI: https://docs.crewai.com/installation
