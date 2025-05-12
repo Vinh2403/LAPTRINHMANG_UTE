@@ -1,0 +1,27 @@
+[project]
+name = "testapi"
+version = "0.1.0"
+description = "A reconnaissance tool using CrewAI for security analysis"
+requires-python = ">=3.11"
+dependencies = [
+    "crewai>=0.118.0",
+    "langchain-openai>=0.0.5",
+    "python-dotenv>=1.0.0",
+    "dnspython>=2.4.2",
+    "python-whois>=0.8.0",
+    "sublist3r>=1.0",
+    "python-nmap>=0.7.1",
+    "validators>=0.33.0",
+    "pydantic>=2.9.2",
+    "dnsrecon>=0.9.19",
+    "dirsearch>=0.4.3",
+    "pytest>=7.4.0",
+    "crewai_tools>=0.1.6",
+]
+
+[build-system]
+requires = ["hatchling>=1.25.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/testapi"]

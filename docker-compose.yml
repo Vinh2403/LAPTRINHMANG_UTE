@@ -1,0 +1,16 @@
+services:
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/app
+    environment:
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"  # Optional: remove if not needed
+    command: uv run python3 src/testapi/main.py
+    stdin_open: true  # Enable interactive input
+    tty: true         # Allocate a pseudo-TTY for input
