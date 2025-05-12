@@ -41,4 +41,3 @@ ENV DEEPSEEK_API_KEY=""
 ENV PYTHONPATH=/app/src
 
 # Command to run the agent
-CMD ["python3", "-m", "testapi.main"]
