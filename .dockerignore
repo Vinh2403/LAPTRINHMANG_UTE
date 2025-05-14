@@ -1,0 +1,28 @@
+# Bỏ qua toàn bộ thư mục môi trường ảo
+.venv/
+
+# Bỏ qua các file cache của Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Bỏ qua cache của các công cụ (nếu có)
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Bỏ qua cấu hình IDE (tùy chọn, nhưng nên có)
+.vscode/
+.idea/
+
+# Bỏ qua thư mục .git
+.git/
+
+# Các file log và output không cần thiết trong image
+*.log
+recon_results_*.md 
+# download.log (nếu không cần thiết khi build image)
+
+# File hệ thống của macOS và Windows
+.DS_Store
+Thumbs.db
