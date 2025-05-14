@@ -123,7 +123,7 @@ class ReconCrew:
                 ReconTool(
                     name="Directory Enumeration",
                     description="Enumerates directories on a web server",
-                    command="dirsearch -u https://{target} -w /app/wordlists/common.txt --plain-text-report dirsearch_output.txt",
+                    command="dirsearch -u https://{target} -w /app/wordlists/common.txt -e php,html,js,asp,aspx -i 200,301,302 -t 50 --format=plain --exclude-status=403,404 --exclude-text='Forbidden|Not Found' -o dirsearch_output.txt",
                     tool_name="Directory Enumeration"
                 )
             ]

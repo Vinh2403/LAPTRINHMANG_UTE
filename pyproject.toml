@@ -1,5 +1,5 @@
 [project]
-name = "testapi"
+name = "LAPTRINHMANG_UTES"
 version = "0.1.0"
 description = "A reconnaissance tool using CrewAI for security analysis"
 requires-python = ">=3.11"
