@@ -1,3 +1,4 @@
+
 # Bỏ qua toàn bộ thư mục môi trường ảo
 .venv/
 
@@ -26,3 +27,4 @@ recon_results_*.md
 # File hệ thống của macOS và Windows
 .DS_Store
 Thumbs.db
+
