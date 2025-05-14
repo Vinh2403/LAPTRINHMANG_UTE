@@ -27,7 +27,11 @@ class ReconTool(BaseTool):
         """Execute the reconnaissance command with the provided target."""
         actual_output_file = None
         formatted_command = self.command # Khởi tạo formatted_command
-
+ # --- DEBUGGING LINES ---
+        print(f"--- ReconTool DEBUG ---")
+        print(f"Tool Name: {self.tool_name}")
+        print(f"Received target input by agent: '{target}'")
+        # --- END DEBUGGING LINES ---
         try:
             if self.writes_to_file and self.output_file_template:
                 # Tạo tên file output duy nhất để tránh ghi đè nếu chạy nhiều lần hoặc song song
