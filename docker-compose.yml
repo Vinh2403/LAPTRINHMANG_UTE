@@ -3,6 +3,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     volumes:
       - .:/app
     environment:
@@ -10,6 +13,6 @@ services:
     env_file:
       - .env
     ports:
-      - "8000:8000"  # Optional: remove if not needed
-    stdin_open: true  # Enable interactive input
-    tty: true         # Allocate a pseudo-TTY for input
+      - "8000:8000" # Optional: remove if not needed
+    stdin_open: true # Enable interactive input
+    tty: true # Allocate a pseudo-TTY for input
