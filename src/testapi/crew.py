@@ -1,4 +1,3 @@
-
 from crewai import Agent, Crew, Process, Task
 from tools.custom_tool import ReconTool
 from langchain_openai import ChatOpenAI
@@ -164,7 +163,7 @@ If enumeration fails, suggest retries with fewer threads (e.g., --threads=3), sh
                 ReconTool(
                     name="Directory Enumeration",
                     description=f"Enumerates directories on a web server at https://{self.target_url}.",
-                    command="dirsearch -u https://{target} -o {output_file} --force-extensions -e php,asp,aspx,jsp,html,js,txt,bak,config,yml,yaml -r",
+                    command="dirsearch -u https://{target} -w  wordlists/small.txt -o {output_file}",
                     tool_name="Directory Enumeration",
                     writes_to_file=True,
                     output_file_template="dirsearch_output_{target}.txt"
@@ -191,7 +190,7 @@ If the scan fails, suggest retries with a lower aggression level (e.g., -a 1).
                 ReconTool(
                     name="WhatWeb Scan",
                     description=f"Identifies technologies used by the website https://{self.target_url} with customizable aggression.",
-                    command="whatweb -a {aggression} https://{target}",
+                    command="whatweb -a 3 https://{target}",
                     tool_name="WhatWeb Scan"
                 )
             ],

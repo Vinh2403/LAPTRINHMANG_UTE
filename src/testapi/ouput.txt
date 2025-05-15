@@ -1,0 +1,6 @@
+# Dirsearch started Thu May 15 16:57:36 2025 as: /usr/local/bin/dirsearch -u https://banhsinhnhat.com -o ouput.txt --force-extensions -e php,asp,aspx,jsp,html,js,txt,bak,config,yml,yaml -r
+
+502   552B   https://banhsinhnhat.com/.externalNativeBuild
+502   552B   https://banhsinhnhat.com/09.txt
+502   552B   https://banhsinhnhat.com/72
+502   552B   https://banhsinhnhat.com/_mem_bin/formslogin.asp
