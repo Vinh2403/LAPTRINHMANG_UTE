@@ -1,4 +1,3 @@
-# crew.py
 from crewai import Agent, Crew, Process, Task
 from tools.custom_tool import ReconTool
 from langchain_openai import ChatOpenAI
@@ -14,13 +13,10 @@ class ReconCrew:
     """Reconnaissance Crew for Security Analysis"""
     def __init__(self, target_url: str):
         if not validators.url(f"https://{target_url}") and not validators.url(f"http://{target_url}"):
-            # Sửa lỗi: nếu target_url đã có http/https, validators.url sẽ báo lỗi
-            # Nên kiểm tra target_url trực tiếp hoặc chuẩn hóa trước khi kiểm tra
             test_url = target_url if target_url.startswith(("http://", "https://")) else f"http://{target_url}"
             if not validators.url(test_url):
-                 raise ValueError(f"Invalid URL: {target_url}")
-        self.target_url = target_url.rstrip("/") # target_url này là domain, ví dụ example.com
-
+                raise ValueError(f"Invalid URL: {target_url}")
+        self.target_url = target_url.rstrip("/")
         api_key = os.getenv("DEEPSEEK_API_KEY")
         if not api_key:
             raise ValueError("DEEPSEEK_API_KEY not found in .env file")
@@ -29,7 +25,7 @@ class ReconCrew:
             api_key=api_key,
             base_url="https://api.deepseek.com",
             model="deepseek/deepseek-chat",
-            temperature=0.3 # Giảm temperature để output ổn định hơn cho việc phân tích
+            temperature=0.3
         )
 
         self.required_tools = ["whois", "dnsrecon", "sublist3r", "nmap", "dirsearch", "whatweb"]
@@ -47,15 +43,15 @@ class ReconCrew:
     def whois_agent(self) -> Agent:
         return Agent(
             role="WHOIS Information Specialist",
-            goal=f"Gather comprehensive domain registration and ownership information for {self.target_url}, and extract key entities (Registrant, Admin, Tech contacts).",
-            backstory="Expert in domain registration analysis and WHOIS data interpretation, skilled at identifying crucial contact and organizational details.",
+            goal=f"Analyze WHOIS data for {self.target_url} to extract registrant, admin, and tech contact details. Assess the risk of exposed contact information (e.g., personal emails may indicate weak privacy measures). If the lookup fails, suggest retrying with alternative WHOIS servers.",
+            backstory="Expert in domain registration analysis, skilled at evaluating WHOIS data for security implications and troubleshooting lookup issues.",
             verbose=True,
             llm=self.llm,
             tools=[
                 ReconTool(
                     name="WHOIS Lookup",
                     description=f"Fetches WHOIS information for a domain {self.target_url}.",
-                    command="whois {target}", # {target} sẽ là self.target_url
+                    command="whois {target}",
                     tool_name="WHOIS Lookup"
                 )
             ],
@@ -65,16 +61,18 @@ class ReconCrew:
     def dns_agent(self) -> Agent:
         return Agent(
             role="DNS Enumeration Specialist",
-            goal=f"Discover and analyze DNS records (A, AAAA, MX, NS, TXT, CNAME, SOA) for {self.target_url} to map its network infrastructure.",
-            backstory="Expert in DNS analysis and record enumeration, capable of identifying potential misconfigurations or interesting service endpoints.",
+            goal=f"Enumerate DNS records (A, AAAA, MX, NS, TXT, CNAME, SOA) for {self.target_url} and parse JSON output to identify misconfigurations (e.g., missing SPF/DKIM/DMARC, unusual nameservers). Assess the risk of each finding (e.g., missing DMARC may allow email spoofing, high risk). If enumeration fails, suggest retrying with a longer timeout or alternative DNS servers.",
+            backstory="Expert in DNS analysis, adept at parsing structured outputs and assessing security risks from misconfigurations.",
             verbose=True,
             llm=self.llm,
             tools=[
                 ReconTool(
                     name="DNS Recon",
-                    description=f"Enumerates DNS records for {self.target_url}.",
-                    command="dnsrecon -d {target} -a -s -x --json", # Thêm --json để output có cấu trúc hơn nếu tool hỗ trợ
-                    tool_name="DNS Recon"
+                    description=f"Enumerates DNS records for {self.target_url} in JSON format.",
+                    command="dnsrecon -d {target} -a -s -j {output_file}",
+                    tool_name="DNS Recon",
+                    writes_to_file=True,
+                    output_file_template="dnsrecon_output_{target}.json"
                 )
             ],
             allow_delegation=False
@@ -83,18 +81,18 @@ class ReconCrew:
     def subdomain_agent(self) -> Agent:
         return Agent(
             role="Subdomain Discovery Specialist",
-            goal=f"Find all active subdomains of {self.target_url} and verify their accessibility.",
-            backstory="Expert in subdomain enumeration and discovery techniques, including brute-forcing and OSINT.",
+            goal=f"Discover all active subdomains of {self.target_url} and verify their accessibility. Identify sensitive subdomains (e.g., 'dev', 'admin', 'staging') and assess their risk (e.g., exposed 'dev' may leak development data, high risk). Recommend further scans (e.g., port scans, directory enumeration) for critical subdomains. If enumeration fails, suggest retrying with alternative tools or configurations.",
+            backstory="Expert in subdomain enumeration and OSINT, skilled at identifying high-value targets and assessing their security implications.",
             verbose=True,
             llm=self.llm,
             tools=[
                 ReconTool(
                     name="Subdomain Enumeration",
                     description=f"Discovers subdomains for {self.target_url}.",
-                    command="sublist3r -d {target} -o sublist3r_output_{target}.txt", # Ghi ra file để có thể đọc lại nếu cần
+                    command="sublist3r -d {target} -o sublist3r_output_{target}.txt",
                     tool_name="Subdomain Enumeration",
-                    writes_to_file=True, # Đánh dấu tool này ghi ra file
-                    output_file_template="sublist3r_output_{target}.txt" # Mẫu tên file
+                    writes_to_file=True,
+                    output_file_template="sublist3r_output_{target}.txt"
                 )
             ],
             allow_delegation=False
@@ -103,17 +101,15 @@ class ReconCrew:
     def port_scan_agent(self) -> Agent:
         return Agent(
             role="Network Port Scanning Specialist",
-            goal=f"Identify open TCP/UDP ports, running services, and their versions on {self.target_url}. If subdomains are known, consider them for scanning if explicitly instructed.",
-            backstory="Expert in network scanning and service identification using Nmap, focusing on accuracy and thoroughness.",
+            goal=f"Identify open TCP/UDP ports, services, and versions on {self.target_url}. For each open port, analyze the service and version to identify potential vulnerabilities (e.g., outdated versions like Apache 2.4.29). Check for known CVEs associated with specific versions, using only tool outputs or well-known vulnerability data (e.g., Apache 2.4.29 has CVE-2017-9798). Assess the risk of each finding (e.g., outdated service = high risk). If subdomains are in context, recommend scanning critical ones (e.g., 'dev.{self.target_url}'). If the scan fails, suggest retrying with slower scan speed (e.g., -T3).",
+            backstory="Expert in network scanning and vulnerability assessment, skilled at correlating service versions with known vulnerabilities and optimizing Nmap scans.",
             verbose=True,
             llm=self.llm,
             tools=[
                 ReconTool(
                     name="Nmap Scan",
-                    description=f"Scans ports and services on {self.target_url}. Can also scan specific subdomains if provided in the target.",
-                    # Nmap có thể quét nhiều target, nhưng để đơn giản, ta vẫn truyền target chính.
-                    # Việc quét subdomain sẽ được quyết định bởi logic của task/agent hoặc task tổng hợp.
-                    command="nmap -sV -sC -T4 -Pn {target}", # -Pn để bỏ qua host discovery, -T4 để nhanh hơn
+                    description=f"Scans ports and services on {self.target_url}.",
+                    command="nmap -sV -sC -T4 -Pn {target}",
                     tool_name="Nmap Scan"
                 )
             ],
@@ -123,19 +119,18 @@ class ReconCrew:
     def directory_agent(self) -> Agent:
         return Agent(
             role="Web Directory Enumeration Specialist",
-            goal=f"Discover hidden or common directories and files on web servers hosted at https://{self.target_url}.",
-            backstory="Expert in web directory enumeration, using wordlists and common patterns to find accessible paths.",
+            goal=f"Enumerate directories and files on https://{self.target_url} to identify sensitive paths (e.g., admin panels, backup files, configuration files). Assess the risk of each finding (e.g., exposed /admin = critical risk). If enumeration fails, suggest retrying with fewer threads (e.g., --threads=5) or a longer timeout.",
+            backstory="Expert in web directory enumeration, skilled at identifying high-risk paths and adjusting tool parameters to bypass rate-limiting.",
             verbose=True,
             llm=self.llm,
             tools=[
                 ReconTool(
                     name="Directory Enumeration",
-                    description=f"Enumerates directories on a web server at https://{self.target_url}. Ensure the output file is specified in the command.",
-                    # {output_file} sẽ được ReconTool thay thế
-                    command="dirsearch -u https://{target} -o {output_file} --force-extensions -e php,asp,aspx,jsp,html,js,txt,bak,config,yml,yaml -r",
+                    description=f"Enumerates directories on a web server at https://{self.target_url}.",
+                    command="dirsearch -u https://{target} -o {output_file} --force-extensions -e php,asp,aspx,jsp,html,js,txt,bak,config,yml,yaml -r --threads=10",
                     tool_name="Directory Enumeration",
-                    writes_to_file=True, # Đánh dấu tool này ghi ra file
-                    output_file_template="dirsearch_output_{target}.txt" # Mẫu tên file
+                    writes_to_file=True,
+                    output_file_template="dirsearch_output_{target}.txt"
                 )
             ],
             allow_delegation=False
@@ -144,109 +139,105 @@ class ReconCrew:
     def tech_stack_agent(self) -> Agent:
         return Agent(
             role="Technology Stack Analyst",
-            goal=f"Identify web technologies, frameworks, CMS, server software, and programming languages used by https://{self.target_url}.",
-            backstory="Expert in web technology identification and analysis using tools like WhatWeb.",
+            goal=f"Identify the technology stack (web server, frameworks, CMS, libraries) for https://{self.target_url}. Correlate findings with known vulnerabilities (e.g., WordPress 5.8.1 has specific CVEs). Assess the risk of each technology (e.g., outdated CMS = high risk). If the scan fails, suggest retrying with a different aggression level (e.g., -a 1).",
+            backstory="Expert in web technology identification, skilled at linking technologies to vulnerabilities and assessing their security impact.",
             verbose=True,
             llm=self.llm,
             tools=[
                 ReconTool(
                     name="WhatWeb Scan",
                     description=f"Identifies technologies used by the website https://{self.target_url}.",
-                    command="whatweb -a 3 https://{target}", # -a 3 for aggression level
+                    command="whatweb -a 3 https://{target}",
                     tool_name="WhatWeb Scan"
                 )
             ],
             allow_delegation=False
         )
 
-    def reporting_agent(self) -> Agent: # AGENT MỚI
+    def reporting_agent(self) -> Agent:
         return Agent(
             role="Lead Security Analyst and Report Synthesizer",
-            goal=f"Compile, analyze, and synthesize all reconnaissance findings for {self.target_url} into a comprehensive, structured security report. Highlight key vulnerabilities, misconfigurations, and provide actionable recommendations.",
-            backstory="An experienced security analyst skilled at interpreting diverse reconnaissance data (WHOIS, DNS, Subdomains, Ports, Directories, Tech Stack), correlating findings, and producing clear, actionable intelligence reports.",
+            goal=f"Compile and synthesize all reconnaissance findings for {self.target_url} into a comprehensive report. Correlate data across tasks (e.g., if Subdomain Agent finds 'dev.{self.target_url}', suggest Port Scan Agent and Directory Agent scan it further). Identify vulnerabilities and misconfigurations, assigning risk levels (low, medium, high). Review task failures and suggest retries with adjusted parameters (e.g., Nmap -T3, dirsearch --threads=5). Provide actionable recommendations to mitigate identified risks.",
+            backstory="Expert security analyst skilled at correlating diverse reconnaissance data, assessing risks, and producing actionable intelligence reports.",
             verbose=True,
             llm=self.llm,
-            tools=[], # Agent này không dùng tool ngoài, chỉ dùng LLM để phân tích
+            tools=[],
             allow_delegation=False
         )
 
     # --- TASKS ---
-    # Các task sẽ được thực thi tuần tự, output của task trước sẽ có trong context của task sau
     def whois_task(self, agent: Agent) -> Task:
         return Task(
-            description=f"Execute a WHOIS lookup for the domain '{self.target_url}'. Extract and list the registrant organization, admin contact, and tech contact if available. Summarize key findings.",
+            description=f"Execute a WHOIS lookup for '{self.target_url}'. Extract registrant, admin, and tech contact details. Analyze for exposed sensitive information (e.g., personal emails, physical addresses) and assess risk (e.g., exposed personal data = medium risk). If the lookup fails, suggest retrying with alternative WHOIS servers.",
             agent=agent,
-            expected_output=f"A summary of key WHOIS information for {self.target_url}, including registrant, admin, and tech contacts, and any notable registration details."
+            expected_output=f"A summary of WHOIS information for {self.target_url}, including registrant, admin, and tech contacts, with risk assessment of exposed data and retry suggestions for failures."
         )
 
     def dns_task(self, agent: Agent) -> Task:
         return Task(
-            description=f"Perform DNS enumeration for '{self.target_url}'. List all discovered A, AAAA, MX, NS, TXT, CNAME, and SOA records. Analyze for any unusual or potentially vulnerable configurations.",
+            description=f"Enumerate DNS records for '{self.target_url}' using dnsrecon with JSON output. Parse the JSON to list A, AAAA, MX, NS, TXT, CNAME, and SOA records. Analyze for misconfigurations (e.g., missing SPF/DKIM/DMARC, unusual nameservers) and assess risk (e.g., missing DMARC = high risk for email spoofing). If enumeration fails, suggest retrying with a longer timeout or alternative DNS servers.",
             agent=agent,
-            expected_output=f"A comprehensive list of DNS records for {self.target_url}, with analysis of potential security implications or interesting findings (e.g., SPF/DKIM/DMARC records, mail servers, nameservers)."
-            # context=[self.whois_task] # Có thể thêm context nếu muốn, nhưng ở đây không quá cần thiết
+            expected_output=f"A detailed list of DNS records for {self.target_url} from JSON output, with analysis of misconfigurations, risk levels (low, medium, high), and retry suggestions for failures.",
+            context=[self.whois_task(self.whois_agent())]
         )
 
     def subdomain_task(self, agent: Agent) -> Task:
         return Task(
-            description=f"Discover all publicly accessible subdomains for the domain '{self.target_url}'. Provide a list of found subdomains. Verify their accessibility.",
+            description=f"Discover all publicly accessible subdomains for '{self.target_url}'. Verify accessibility (resolves to IP, responds to HTTP/HTTPS). Identify sensitive subdomains (e.g., 'dev', 'admin', 'staging') and assess risk (e.g., exposed 'dev' = high risk). Recommend further scans (e.g., port scans, directory enumeration) for critical subdomains. If enumeration fails, suggest retrying with alternative tools or configurations.",
             agent=agent,
-            expected_output=f"A list of discovered subdomains for {self.target_url}. For each subdomain, note if it's accessible (e.g., resolves to an IP and responds to HTTP/HTTPS).",
-            context=[self.dns_task(self.dns_agent())] # DNS task có thể cung cấp manh mối cho subdomains
+            expected_output=f"A list of subdomains for {self.target_url}, noting accessibility, highlighting sensitive ones with risk levels, recommending further scans, and including retry suggestions for failures.",
+            context=[self.dns_task(self.dns_agent())]
         )
 
     def port_scan_task(self, agent: Agent) -> Task:
         return Task(
-            description=f"Conduct a port scan on the primary domain '{self.target_url}'. Identify open TCP ports, the services running on them, and their versions. Analyze for any outdated or vulnerable services based on version information. If the previous task (subdomain discovery) found critical subdomains, briefly mention if they should be considered for deeper scans later.",
+            description=f"Conduct a port scan on '{self.target_url}'. Identify open TCP ports, services, and versions. For each service with a specific version (e.g., Apache 2.4.29), check for known CVEs using tool outputs or well-known vulnerability data (e.g., CVE-2017-9798 for Apache 2.4.29). Assess the risk of each finding (e.g., outdated service = high risk). If subdomains are in context, recommend scanning critical ones (e.g., 'dev', 'admin'). If the scan fails, suggest retrying with adjusted parameters (e.g., -T3).",
             agent=agent,
-            expected_output=f"Detailed port scan results for {self.target_url} (IP address resolved from the domain), including open ports, service names, and versions. Highlight any services known for vulnerabilities or common misconfigurations. Mention if subdomains data from context suggests further scanning targets.",
-            context=[self.subdomain_task(self.subdomain_agent())] # Output của subdomain_task sẽ có trong context
+            expected_output=f"Detailed port scan results for {self.target_url}, including open ports, services, versions, known CVEs, and risk levels. Recommend scanning critical subdomains from context. Include retry suggestions for failures.",
+            context=[self.subdomain_task(self.subdomain_agent())]
         )
 
     def directory_task(self, agent: Agent) -> Task:
         return Task(
-            description=f"Enumerate web directories and files for 'https://{self.target_url}'. Identify any interesting or potentially sensitive paths (e.g., admin panels, backup files, exposed configuration files, common framework paths like /wp-admin, .git).",
+            description=f"Enumerate directories and files for 'https://{self.target_url}'. Identify sensitive paths (e.g., admin panels, backup files, configuration files) and assess risk (e.g., exposed /admin = critical risk). If enumeration fails, suggest retrying with fewer threads (e.g., --threads=5) or a longer timeout.",
             agent=agent,
-            expected_output=f"A list of discovered directories and files on https://{self.target_url} with their HTTP status codes. Highlight any paths that seem sensitive, are related to known frameworks, or might indicate information leakage.",
-            context=[self.tech_stack_task(self.tech_stack_agent())] # Tech stack có thể gợi ý các path đặc trưng
+            expected_output=f"A list of directories and files on https://{self.target_url} with HTTP status codes, highlighting sensitive paths with risk levels and potential information leakage. Include retry suggestions for failures.",
+            context=[self.tech_stack_task(self.tech_stack_agent())]
         )
 
     def tech_stack_task(self, agent: Agent) -> Task:
         return Task(
-            description=f"Identify the technology stack (web server, backend languages, frameworks, CMS, JavaScript libraries, etc.) for 'https://{self.target_url}'. Correlate findings with common vulnerabilities associated with the identified technologies.",
+            description=f"Identify the technology stack for 'https://{self.target_url}' (web server, frameworks, CMS, libraries). Correlate findings with known vulnerabilities (e.g., WordPress 5.8.1 has specific CVEs) using tool outputs or well-known vulnerability data. Assess risk (e.g., outdated CMS = high risk). If the scan fails, suggest retrying with a different aggression level (e.g., -a 1).",
             agent=agent,
-            expected_output=f"A detailed list of technologies, frameworks, and software versions used by https://{self.target_url}. Include any known vulnerabilities or security considerations for the identified stack.",
-            # context=[self.port_scan_task(self.port_scan_agent())] # Port scan có thể tiết lộ server software
+            expected_output=f"A detailed list of technologies and versions for https://{self.target_url}, with known vulnerabilities, risk levels, and retry suggestions for failures."
         )
 
-    def reporting_task(self, agent: Agent, all_tasks: List[Task]) -> Task: # TASK MỚI
+    def reporting_task(self, agent: Agent, all_tasks: List[Task]) -> Task:
         return Task(
             description=f"""
-Compile and synthesize all reconnaissance data gathered for '{self.target_url}'.
-The data includes:
+Compile and synthesize all reconnaissance data for '{self.target_url}' from:
 - WHOIS Information
 - DNS Records
 - Discovered Subdomains
 - Open Ports and Services
 - Web Directories and Files
 - Technology Stack
-
-Analyze this consolidated information to:
-1.  Provide a concise executive summary of the reconnaissance.
-2.  Identify potential attack vectors or key areas of security concern.
-3.  List any specific vulnerabilities or misconfigurations suggested by the tool outputs (e.g., outdated software versions, exposed sensitive paths, weak DNS configurations).
-4.  Suggest actionable security recommendations based on the findings.
-5.  Structure the final output in clear, well-organized Markdown format.
-Use the context from all previous tasks.
+Analyze the data to:
+1. Provide a concise executive summary of findings.
+2. Correlate data across tasks (e.g., if Subdomain Agent finds 'dev.{self.target_url}', suggest Port Scan Agent and Directory Agent scan it further).
+3. Identify vulnerabilities and misconfigurations, assigning risk levels (low, medium, high) based on findings (e.g., exposed admin panel = critical, missing DMARC = high).
+4. Review task failures (e.g., timeouts, errors) and suggest retries with adjusted parameters (e.g., Nmap -T3, dirsearch --threads=5).
+5. Provide actionable recommendations to mitigate risks (e.g., update outdated software, secure exposed subdomains).
+6. Structure the output in clear Markdown format with sections for each task, correlations, risks, and recommendations.
+Use context from all previous tasks.
             """,
             agent=agent,
-            expected_output=f"A comprehensive and structured Markdown report detailing all reconnaissance findings for {self.target_url}, including an executive summary, identified potential vulnerabilities, and actionable security recommendations. The report should be easy to read and understand.",
-            context=all_tasks # Cung cấp context từ tất cả các task trước đó
+            expected_output=f"A comprehensive Markdown report for {self.target_url}, including an executive summary, correlated findings, vulnerabilities with risk levels, task failure analysis with retry suggestions, and actionable recommendations.",
+            context=all_tasks
         )
 
     def create_crew(self) -> Crew:
         """Creates the Reconnaissance crew"""
-        # Khởi tạo agents
         _whois_agent = self.whois_agent()
         _dns_agent = self.dns_agent()
         _subdomain_agent = self.subdomain_agent()
@@ -255,29 +246,22 @@ Use the context from all previous tasks.
         _tech_stack_agent = self.tech_stack_agent()
         _reporting_agent = self.reporting_agent()
 
-        # Khởi tạo tasks
-        # Lưu ý: khi task A cần context từ task B, task B phải được định nghĩa trước
-        # và truyền vào context của task A.
-        # Thứ tự trong list `tasks` của Crew sẽ quyết định thứ tự thực thi.
-
         task_whois = self.whois_task(_whois_agent)
         task_dns = self.dns_task(_dns_agent)
         task_subdomain = self.subdomain_task(_subdomain_agent)
-        # Để tech_stack chạy trước directory, vì tech_stack có thể cung cấp thông tin hữu ích cho directory_task
         task_tech_stack = self.tech_stack_task(_tech_stack_agent)
         task_port_scan = self.port_scan_task(_port_scan_agent)
         task_directory = self.directory_task(_directory_agent)
-        
-        # Danh sách các task thu thập thông tin cho reporting_task
+
         recon_tasks = [
             task_whois,
             task_dns,
             task_subdomain,
-            task_tech_stack, # Đã chạy trước port_scan và directory
+            task_tech_stack,
             task_port_scan,
             task_directory
         ]
-        
+
         task_report = self.reporting_task(_reporting_agent, recon_tasks)
 
         all_crew_tasks = recon_tasks + [task_report]
@@ -287,14 +271,13 @@ Use the context from all previous tasks.
                 _whois_agent,
                 _dns_agent,
                 _subdomain_agent,
-                _tech_stack_agent, # Cập nhật thứ tự agent nếu cần khớp với task
+                _tech_stack_agent,
                 _port_scan_agent,
                 _directory_agent,
                 _reporting_agent
             ],
             tasks=all_crew_tasks,
             process=Process.sequential,
-            verbose=True, # verbose=2 để xem chi tiết hơn quá trình làm việc của agent
-            llm=self.llm,
-            # memory=True # Bật memory nếu bạn muốn crew ghi nhớ các tương tác dài hạn hơn qua nhiều lần kickoff (cẩn thận về token usage)
+            verbose=True,
+            llm=self.llm
         )
