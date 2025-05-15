@@ -69,21 +69,21 @@ If the lookup fails, suggest retrying with alternative WHOIS servers (e.g., whoi
         return Agent(
             role="DNS Enumeration Specialist",
             goal=f"""
-Enumerate all DNS records (A, AAAA, MX, NS, TXT, CNAME, SOA) for {self.target_url} using JSON output.
-Parse the JSON to list all records, including IP addresses, mail servers, nameservers, and TXT records (e.g., SPF, DKIM, DMARC).
-Analyze for misconfigurations (e.g., missing SPF/DKIM/DMARC, unusual nameservers).
-Assess risk (e.g., missing DMARC = high risk for email spoofing).
+Enumerate DNS records for {self.target_url} using JSON output, including zone transfer attempts and SRV records.
+Parse the JSON to list all records (A, AAAA, MX, NS, TXT, CNAME, SOA, SRV), including IPs, mail servers, nameservers, and TXT records (e.g., SPF, DKIM, DMARC).
+Analyze for misconfigurations (e.g., missing SPF/DKIM/DMARC, successful zone transfers, unusual nameservers).
+Assess risk (e.g., successful zone transfer = critical risk, missing DMARC = high risk for email spoofing).
 Include raw JSON output.
 If enumeration fails, suggest retries with longer timeouts, alternative DNS servers (e.g., 8.8.8.8), or tools like `dig`.
 """,
-            backstory="Expert in DNS analysis, proficient in parsing JSON outputs and identifying security risks from DNS misconfigurations.",
+            backstory="Expert in DNS analysis, proficient in parsing JSON outputs and identifying security risks from DNS misconfigurations and zone transfers.",
             verbose=True,
             llm=self.llm,
             tools=[
                 ReconTool(
                     name="DNS Recon",
-                    description=f"Enumerates DNS records for {self.target_url} in JSON format.",
-                    command="dnsrecon -d {target} -t std -j {output_file}",
+                    description=f"Enumerates DNS records for {self.target_url} in JSON format, including zone transfers.",
+                    command="dnsrecon -d {target} -t std -s -j {output_file}",
                     tool_name="DNS Recon",
                     writes_to_file=True,
                     output_file_template="dnsrecon_output_{target}.json"
@@ -124,14 +124,14 @@ If enumeration fails, suggest retries with alternative tools (e.g., Amass, Fierc
         return Agent(
             role="Network Port Scanning Specialist",
             goal=f"""
-Identify all open TCP and UDP ports, services, and versions on {self.target_url}.
+Identify open TCP ports, services, and versions on {self.target_url} for the top 100 ports.
 Analyze each open port's service and version to identify potential vulnerabilities (e.g., outdated versions like Apache 2.4.29).
 Check for known CVEs using tool outputs or well-known vulnerability data (e.g., CVE-2017-9798 for Apache 2.4.29).
 Include all scan details (e.g., SSL certificate SANs, HTTP methods, robots.txt, OS detection).
 Assess the risk of each finding (e.g., outdated service = high risk).
 If subdomains are in context, recommend scanning critical ones (e.g., 'dev', 'admin').
 Include raw Nmap output.
-If the scan fails, suggest retries with slower scan speed (e.g., -T3) or different scan types (e.g., -sU for UDP).
+If the scan fails, suggest retries with slower scan speed (e.g., -T3) or additional scan types (e.g., -sU for UDP).
 """,
             backstory="Expert in network scanning and vulnerability assessment, skilled at correlating service versions with known vulnerabilities and optimizing Nmap scans.",
             verbose=True,
@@ -140,7 +140,7 @@ If the scan fails, suggest retries with slower scan speed (e.g., -T3) or differe
                 ReconTool(
                     name="Nmap Scan",
                     description=f"Scans ports and services on {self.target_url}.",
-                    command="nmap -sV -sC -T4 -Pn -p- -sU {target}",
+                    command="nmap -sV -sC -T4 -Pn {target}",
                     tool_name="Nmap Scan"
                 )
             ],
@@ -155,7 +155,7 @@ Enumerate directories and files on https://{self.target_url} to identify sensiti
 Include all discovered paths, their HTTP status codes, and response sizes.
 Assess the risk of each finding (e.g., exposed /admin = critical risk).
 Include raw tool output.
-If enumeration fails, suggest retries with fewer threads (e.g., --threads=5), longer timeouts, or delay settings (e.g., --delay=1000).
+If enumeration fails, suggest retries with fewer threads (e.g., --threads=3), shorter delays (e.g., --delay=250), or limited recursion (e.g., --recursion-depth=1).
 """,
             backstory="Expert in web directory enumeration, skilled at identifying high-risk paths and adjusting tool parameters to bypass rate-limiting.",
             verbose=True,
@@ -164,7 +164,7 @@ If enumeration fails, suggest retries with fewer threads (e.g., --threads=5), lo
                 ReconTool(
                     name="Directory Enumeration",
                     description=f"Enumerates directories on a web server at https://{self.target_url}.",
-                    command="dirsearch -u https://{target} -o {output_file} --force-extensions -e php,asp,aspx,jsp,html,js,txt,bak,config,yml,yaml -r --threads=5 --delay=1000",
+                    command="dirsearch -u https://{target} -o {output_file} --force-extensions -e php,asp,aspx,jsp,html,js,txt,bak,config,yml,yaml -r",
                     tool_name="Directory Enumeration",
                     writes_to_file=True,
                     output_file_template="dirsearch_output_{target}.txt"
@@ -177,21 +177,21 @@ If enumeration fails, suggest retries with fewer threads (e.g., --threads=5), lo
         return Agent(
             role="Technology Stack Analyst",
             goal=f"""
-Identify the technology stack (web server, frameworks, CMS, libraries) for https://{self.target_url}.
+Identify the technology stack (web server, frameworks, CMS, libraries) for https://{self.target_url} using customizable aggression levels.
 Include all detected technologies, versions, and metadata (e.g., IP address, meta-author).
 Correlate findings with known vulnerabilities (e.g., WordPress 5.8.1 has specific CVEs) using tool outputs or well-known vulnerability data.
 Assess the risk of each technology (e.g., outdated CMS = high risk).
 Include raw tool output.
-If the scan fails, suggest retries with a different aggression level (e.g., -a 1).
+If the scan fails, suggest retries with a lower aggression level (e.g., -a 1).
 """,
-            backstory="Expert in web technology identification, skilled at linking technologies to vulnerabilities and assessing their security impact.",
+            backstory="Expert in web technology identification, skilled at linking technologies to vulnerabilities and adjusting scan aggression for optimal results.",
             verbose=True,
             llm=self.llm,
             tools=[
                 ReconTool(
                     name="WhatWeb Scan",
-                    description=f"Identifies technologies used by the website https://{self.target_url}.",
-                    command="whatweb -a 1 https://{target}",
+                    description=f"Identifies technologies used by the website https://{self.target_url} with customizable aggression.",
+                    command="whatweb -a {aggression} https://{target}",
                     tool_name="WhatWeb Scan"
                 )
             ],
@@ -204,17 +204,17 @@ If the scan fails, suggest retries with a different aggression level (e.g., -a 1
             goal=f"""
 Compile a comprehensive report for {self.target_url} synthesizing all reconnaissance findings from:
 - WHOIS Information (e.g., registrant details, nameservers)
-- DNS Records (e.g., A, MX, TXT, DMARC)
+- DNS Records (e.g., A, MX, TXT, DMARC, SRV)
 - Discovered Subdomains (e.g., dev, admin)
 - Open Ports and Services (e.g., port 80, SSL details)
 - Web Directories and Files (e.g., /admin, backups)
 - Technology Stack (e.g., IIS, ASP.NET)
 Perform the following:
 - Provide a concise executive summary of key findings and risks.
-- Include detailed findings for each task, preserving all raw tool outputs (e.g., Nmap SSL SANs, WhatWeb metadata) and agent analyses.
+- Include detailed findings for each task, preserving all raw tool outputs (e.g., Nmap SSL SANs, WhatWeb metadata, dnsrecon JSON) and agent analyses.
 - Correlate data across tasks (e.g., if Subdomain Agent finds 'dev.{self.target_url}', recommend Port Scan and Directory scans).
-- Identify vulnerabilities and misconfigurations, assigning risk levels (low, medium, high, critical) with justifications.
-- Review task failures (e.g., timeouts, errors) and suggest retries with adjusted parameters (e.g., Nmap -T3, dirsearch --threads=5).
+- Identify vulnerabilities and misconfigurations, assigning risk levels (low, medium, high, critical) with justifications (e.g., exposed admin panel = critical).
+- Review task failures (e.g., timeouts, errors) and suggest retries with adjusted parameters (e.g., Nmap -T3, dirsearch --threads=3).
 - Provide actionable recommendations to mitigate risks (e.g., secure subdomains, patch software).
 - Structure the report in clear Markdown format with sections for executive summary, detailed findings (including raw outputs), correlations, risk matrix, and recommendations.
 Use context from all previous tasks to ensure completeness.
@@ -251,19 +251,19 @@ A detailed summary of WHOIS information for {self.target_url}, including:
     def dns_task(self, agent: Agent) -> Task:
         return Task(
             description=f"""
-Enumerate DNS records for '{self.target_url}' using dnsrecon with JSON output.
-Parse the JSON to list all A, AAAA, MX, NS, TXT, CNAME, and SOA records, including IPs, mail servers, and TXT details (e.g., SPF, DMARC).
-Analyze for misconfigurations (e.g., missing SPF/DKIM/DMARC, unusual nameservers).
-Assess risk (e.g., missing DMARC = high risk).
+Enumerate DNS records for '{self.target_url}' using dnsrecon with JSON output, including zone transfer attempts and SRV records.
+Parse the JSON to list all A, AAAA, MX, NS, TXT, CNAME, SOA, and SRV records, including IPs, mail servers, and TXT details (e.g., SPF, DMARC).
+Analyze for misconfigurations (e.g., missing SPF/DKIM/DMARC, successful zone transfers, unusual nameservers).
+Assess risk (e.g., successful zone transfer = critical risk, missing DMARC = high risk).
 Include raw JSON output.
 If enumeration fails, suggest retries with longer timeouts or alternative DNS servers.
 """,
             agent=agent,
             expected_output=f"""
 A detailed list of DNS records for {self.target_url} from JSON output, including:
-- All record types
+- All record types (A, AAAA, MX, NS, TXT, CNAME, SOA, SRV)
 - Analysis of misconfigurations
-- Risk levels (low, medium, high)
+- Risk levels (low, medium, high, critical)
 - Raw tool output
 - Retry suggestions for failures
 """,
@@ -296,19 +296,19 @@ A comprehensive list of subdomains for {self.target_url}, including:
     def port_scan_task(self, agent: Agent) -> Task:
         return Task(
             description=f"""
-Conduct a port scan on '{self.target_url}' for all TCP and UDP ports.
+Conduct a port scan on '{self.target_url}' for the top 100 TCP ports.
 Identify open ports, services, and versions.
 Check for known CVEs using tool outputs or well-known vulnerability data (e.g., CVE-2017-9798 for Apache 2.4.29).
 Include all scan details (e.g., SSL certificate SANs, HTTP methods, robots.txt, OS detection).
 Assess the risk of each finding (e.g., outdated service = high risk).
 If subdomains are in context, recommend scanning critical ones.
 Include raw Nmap output.
-If the scan fails, suggest retries with adjusted parameters.
+If the scan fails, suggest retries with adjusted parameters (e.g., -T3).
 """,
             agent=agent,
             expected_output=f"""
 Comprehensive port scan results for {self.target_url}, including:
-- All open ports, services, versions
+- Open ports, services, versions
 - CVEs and SSL details
 - HTTP methods and OS detection
 - Risk levels
@@ -322,12 +322,12 @@ Comprehensive port scan results for {self.target_url}, including:
     def directory_task(self, agent: Agent) -> Task:
         return Task(
             description=f"""
-Enumerate directories and files for 'https://{self.target_url}'.
+Enumerate directories and files for 'https://{self.target_url}' with limited recursion.
 Identify sensitive paths (e.g., admin panels, backup files, configuration files).
 Include HTTP status codes and response sizes.
 Assess the risk of each finding (e.g., exposed /admin = critical risk).
 Include raw tool output.
-If enumeration fails, suggest retries with adjusted parameters (e.g., fewer threads, delay settings).
+If enumeration fails, suggest retries with adjusted parameters (e.g., fewer threads, shorter delays).
 """,
             agent=agent,
             expected_output=f"""
@@ -343,12 +343,12 @@ A detailed list of directories and files on https://{self.target_url}, including
     def tech_stack_task(self, agent: Agent) -> Task:
         return Task(
             description=f"""
-Identify the technology stack for 'https://{self.target_url}' (web server, frameworks, CMS, libraries).
+Identify the technology stack for 'https://{self.target_url}' (web server, frameworks, CMS, libraries) using customizable aggression levels.
 Include all detected technologies, versions, and metadata (e.g., IP address, meta-author).
 Correlate findings with known vulnerabilities using tool outputs or well-known vulnerability data.
 Assess the risk of each technology (e.g., outdated CMS = high risk).
 Include raw tool output.
-If the scan fails, suggest retries with a different aggression level.
+If the scan fails, suggest retries with a lower aggression level (e.g., -a 1).
 """,
             agent=agent,
             expected_output=f"""
@@ -366,7 +366,7 @@ A comprehensive list of technologies and versions for https://{self.target_url},
             description=f"""
 Compile a comprehensive report for '{self.target_url}' synthesizing all reconnaissance data from:
 - WHOIS Information (e.g., registrant details, nameservers)
-- DNS Records (e.g., A, MX, TXT, DMARC)
+- DNS Records (e.g., A, MX, TXT, DMARC, SRV)
 - Discovered Subdomains (e.g., dev, admin)
 - Open Ports and Services (e.g., port 80, SSL details)
 - Web Directories and Files (e.g., /admin, backups)
@@ -376,7 +376,7 @@ Perform the following:
 - Include detailed findings for each task, preserving all raw tool outputs (e.g., Nmap SSL SANs, WhatWeb metadata, dnsrecon JSON) and agent analyses.
 - Correlate data across tasks (e.g., match Subdomain Agent's 'dev.{self.target_url}' with Port Scan Agent's open ports).
 - Identify vulnerabilities and misconfigurations, assigning risk levels (low, medium, high, critical) with detailed justifications.
-- Review task failures and suggest retries with specific parameters (e.g., Nmap -T3, dirsearch --threads=5 --delay=1000).
+- Review task failures and suggest retries with specific parameters (e.g., Nmap -T3, dirsearch --threads=3).
 - Provide actionable recommendations to mitigate risks (e.g., secure subdomains, implement DMARC, patch software).
 - Structure the report in Markdown with sections: Executive Summary, Detailed Findings (with raw outputs), Data Correlations, Risk Prioritization Matrix, Recommendations, and Retry Suggestions.
 Use context from all previous tasks to ensure no data is omitted.
