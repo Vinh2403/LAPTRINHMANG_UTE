@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 import subprocess
 from typing import Type, Any, Dict, Optional
 import os
+import re
 
 class ReconToolInput(BaseModel):
     """Input schema for ReconTool."""
@@ -27,48 +28,76 @@ class ReconTool(BaseTool):
         # Define retry configurations for specific tools
         self.retry_config = {
             "Directory Enumeration": [
-                {"threads": "10", "timeout": "700"},
-                {"threads": "5", "timeout": "900"}
+                {"threads": "10", "timeout": "100"},
+                {"threads": "5", "timeout": "200"}
             ],
             "Nmap Scan": [
                 {"flags": "-T3 -Pn"},
                 {"flags": "-T2 -Pn"}
             ],
             "DNS Recon": [
-                {"timeout": "700"},
-                {"timeout": "900"}
+                {"timeout": "100", "flags": "-t A,MX"},
+                {"timeout": "200", "flags": "-t A,NS"}
             ]
         }
 
     def _run(self, target: str, custom_params: Optional[Dict[str, str]] = None) -> str:
         """Execute the reconnaissance command with retries on failure."""
         attempt = 0
-        current_command = self.command
-        timeout = 600  # Default timeout (10 minutes)
+        timeout = 150  # Default timeout
+        original_command = self.command  # Store the original command template
+
+        # Strip http:// or https:// from target for command formatting
+        clean_target = re.sub(r'^https?://', '', target).rstrip('/')
 
         while attempt <= self.max_retries:
             actual_output_file = None
+            current_command = original_command  # Reset to original command each attempt
             try:
                 if self.writes_to_file and self.output_file_template:
-                    safe_target_name = target.replace("http://", "").replace("https://", "").replace("/", "_")
+                    safe_target_name = clean_target.replace("/", "_")
                     actual_output_file = self.output_file_template.format(target=safe_target_name)
-                    current_command = current_command.format(target=target, output_file=actual_output_file)
+                    current_command = current_command.format(target=clean_target, output_file=actual_output_file)
                 else:
-                    current_command = current_command.format(target=target)
+                    current_command = current_command.format(target=clean_target)
 
                 # Apply custom parameters or retry config
-                if attempt > 0 and self.tool_name in self.retry_config:
+                applied_params = {}
+                if attempt == 0 and custom_params:
+                    for key, value in custom_params.items():
+                        if key == "timeout":
+                            try:
+                                timeout = int(value)
+                                applied_params[key] = value
+                            except ValueError:
+                                return f"Error: Invalid timeout value '{value}' for {self.tool_name}"
+                        elif key == "threads" and "dirsearch" in current_command:
+                            current_command = re.sub(r'--threads=\d+', f'--threads={value}', current_command)
+                            applied_params[key] = value
+                        elif key == "flags" and "nmap" in current_command:
+                            current_command = re.sub(r'-T\d\s+-Pn', value, current_command)
+                            applied_params[key] = value
+                        elif key == "extensions" and "dirsearch" in current_command:
+                            current_command = re.sub(r'-e\s+[\w,]+', f'-e {value}', current_command)
+                            applied_params[key] = value
+                        else:
+                            current_command = current_command.replace(f"--{key}", f"--{key}={value}")
+                            applied_params[key] = value
+                elif attempt > 0 and self.tool_name in self.retry_config:
                     retry_params = self.retry_config[self.tool_name][min(attempt - 1, len(self.retry_config[self.tool_name]) - 1)]
                     for key, value in retry_params.items():
                         if key == "threads" and "dirsearch" in current_command:
-                            current_command = current_command.replace("--threads=10", f"--threads={value}")
+                            current_command = re.sub(r'--threads=\d+', f'--threads={value}', current_command)
+                            applied_params[key] = value
                         elif key == "timeout":
                             timeout = int(value)
+                            applied_params[key] = value
                         elif key == "flags" and "nmap" in current_command:
-                            current_command = current_command.replace("-T4 -Pn", value)
-                elif custom_params:
-                    for key, value in custom_params.items():
-                        current_command = current_command.replace(f"--{key}", f"--{key}={value}")
+                            current_command = re.sub(r'-T\d\s+-Pn', value, current_command)
+                            applied_params[key] = value
+                        elif key == "flags" and "dnsrecon" in current_command:
+                            current_command = current_command.replace("-a -s", value)
+                            applied_params[key] = value
 
                 result = subprocess.run(
                     current_command,
@@ -78,7 +107,7 @@ class ReconTool(BaseTool):
                     timeout=timeout
                 )
 
-                output_content = ""
+                output_content = f"Applied parameters: {applied_params}\n"
                 if result.stdout:
                     output_content += f"STDOUT:\n{result.stdout}\n"
                 if result.stderr and result.returncode != 0:

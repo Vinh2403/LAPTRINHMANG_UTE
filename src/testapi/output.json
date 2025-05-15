@@ -1,0 +1,13 @@
+[
+    {
+        "arguments": "/usr/local/bin/dnsrecon -d online.hcmute.edu.vn --json output.json",
+        "date": "2025-05-15 08:39:47.449691",
+        "type": "ScanInfo"
+    },
+    {
+        "address": "203.113.147.179",
+        "domain": "online.hcmute.edu.vn",
+        "name": "online.hcmute.edu.vn",
+        "type": "A"
+    }
+]
