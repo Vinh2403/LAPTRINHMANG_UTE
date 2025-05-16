@@ -8,7 +8,6 @@ python-nmap>=0.7.1
 validators>=0.33.0
 pydantic>=2.9.2
 dnsrecon>=0.9.19
-dirsearch>=0.4.3
 pytest>=7.4.0
 crewai_tools>=0.1.6
 litellm>=1.30.7

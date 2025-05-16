@@ -1,3 +1,4 @@
+
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
 import subprocess
@@ -27,13 +28,12 @@ class ReconTool(BaseTool):
         super().__init__(**data)
 
     def _run(self, target: str, custom_params: Optional[Dict[str, str]] = None) -> str:
-        # Tool-specific timeouts
         timeouts = {
-            "dnsrecon": 300,  
-            "nmap": 300,      
-            "dirsearch": 300, 
+            "dnsrecon": 300,
+            "nmap": 300,
+            "dirb": 300,
         }
-        timeout = 30  # Default for unrecognized tools
+        timeout = 30
         for tool, tool_timeout in timeouts.items():
             if tool in self.command:
                 timeout = tool_timeout
@@ -49,10 +49,18 @@ class ReconTool(BaseTool):
         clean_target = re.sub(r'^https?://', '', target).rstrip('/')
         logging.info(f"Starting {self.tool_name} on {clean_target} (Command: {original_command}, Timeout: {timeout}s, Retries: {self.max_retries})")
 
+        dirb_settings = [
+            {"delay": "50"},
+            {"delay": "200"}
+        ] if "dirb" in self.command else [None]
         attempt = 0
+        current_dirb_index = 0
+
         while attempt <= self.max_retries:
             actual_output_file = None
             current_command = original_command
+            applied_params = {}
+
             try:
                 if self.writes_to_file and self.output_file_template:
                     safe_target_name = clean_target.replace("/", "_")
@@ -61,27 +69,37 @@ class ReconTool(BaseTool):
                 else:
                     current_command = current_command.format(target=clean_target)
 
-                applied_params = {}
+                if "dirb" in self.command:
+                    if "-z" not in current_command:
+                        current_command += " -z 50"
+
                 if custom_params:
                     for key, value in custom_params.items():
                         value = str(value)
                         if key == "timeout":
                             applied_params[key] = value
-                        elif key == "threads" and "dirsearch" in self.command:
-                            current_command = re.sub(r'--threads=\d+', f'--threads={value}', current_command)
+                        elif key == "delay" and "dirb" in self.command:
+                            current_command = re.sub(r'-z \d+', f'-z {value}', current_command)
                             applied_params[key] = value
-                        elif key == "delay" and "dirsearch" in self.command:
-                            current_command = re.sub(r'--delay=\d+', f'--delay={value}', current_command)
-                            applied_params[key] = value
+                        elif key == "recursion-depth" and "dirb" in self.command:
+                            if value == "0":
+                                current_command += " -r"
+                                applied_params[key] = value
+                            else:
+                                current_command += " -R"
+                                applied_params[key] = value
+                        elif key == "threads" and "dirb" in self.command:
+                            applied_params[key] = value  # Ignored for dirb
                         else:
                             current_command = current_command.replace(f"--{key}", f"--{key}={value}")
+                            current_command = current_command.replace(f"-{key}", f"-{key} {value}")
                             applied_params[key] = value
-                elif "dirsearch" in self.command:
-                    current_command = re.sub(r'--threads=\d+', '--threads=5', current_command)
-                    current_command = re.sub(r'--delay=\d+', '--delay=500', current_command)
-                    applied_params = {"threads": "5", "delay": "500"}
+                elif "dirb" in self.command:
+                    delay = dirb_settings[current_dirb_index]["delay"]
+                    current_command = re.sub(r'-z \d+', f'-z {delay}', current_command)
+                    applied_params = {"delay": delay}
 
-                logging.info(f"Attempt {attempt + 1}/{self.max_retries + 1} for {self.tool_name} on {clean_target}")
+                logging.info(f"Attempt {attempt + 1}/{self.max_retries + 1} for {self.tool_name} on {clean_target} with params: {applied_params}")
                 result = subprocess.run(
                     current_command,
                     shell=True,
@@ -107,33 +125,37 @@ class ReconTool(BaseTool):
 
                 if result.returncode != 0:
                     elapsed_time = time.time() - start_time
-                    logging.warning(f"{self.tool_name} failed after {elapsed_time:.2f} seconds on attempt {attempt + 1}")
-                    if attempt < self.max_retries:
-                        attempt += 1
-                        continue
-                    return f"Error executing {self.tool_name} after {self.max_retries + 1} attempts (Command: {current_command}):\n{output_content}"
-
+                    logging.warning(f"{self.tool_name} failed after {elapsed_time:.2f} seconds on attempt {attempt + 1} with params={applied_params}")
+                    if attempt < self.max_retries and "dirb" in self.command and current_dirb_index < len(dirb_settings) - 1:
+                        current_dirb_index += 1
+                        logging.info(f"Adjusting dirb to delay={dirb_settings[current_dirb_index]['delay']} for retry")
+                    attempt += 1
+                    continue
                 elapsed_time = time.time() - start_time
                 logging.info(f"{self.tool_name} completed in {elapsed_time:.2f} seconds on attempt {attempt + 1}")
                 return output_content or "No output"
 
             except subprocess.TimeoutExpired:
                 elapsed_time = time.time() - start_time
-                logging.warning(f"{self.tool_name} timed out after {elapsed_time:.2f} seconds with timeout {timeout}s on attempt {attempt + 1}")
-                if attempt < self.max_retries:
-                    attempt += 1
-                    continue
-                return f"Error: {self.tool_name} (Command: {current_command}) timed out after {timeout}s on {self.max_retries + 1} attempts"
+                logging.warning(f"{self.tool_name} timed out after {elapsed_time:.2f} seconds with timeout {timeout}s on attempt {attempt + 1} with params={applied_params}")
+                if attempt < self.max_retries and "dirb" in self.command and current_dirb_index < len(dirb_settings) - 1:
+                    current_dirb_index += 1
+                    logging.info(f"Adjusting dirb to delay={dirb_settings[current_dirb_index]['delay']} for retry")
+                attempt += 1
+                continue
             except Exception as e:
                 elapsed_time = time.time() - start_time
                 logging.error(f"{self.tool_name} failed after {elapsed_time:.2f} seconds on attempt {attempt + 1}: {str(e)}")
-                if attempt < self.max_retries:
-                    attempt += 1
-                    continue
-                return f"Error executing {self.tool_name} (Command: {current_command}) after {self.max_retries + 1} attempts: {str(e)}"
+                if attempt < self.max_retries and "dirb" in self.command and current_dirb_index < len(dirb_settings) - 1:
+                    current_dirb_index += 1
+                    logging.info(f"Adjusting dirb to delay={dirb_settings[current_dirb_index]['delay']} for retry")
+                attempt += 1
+                continue
             finally:
                 if self.writes_to_file and actual_output_file and os.path.exists(actual_output_file):
                     try:
                         os.remove(actual_output_file)
                     except OSError:
                         pass
+
+        return f"Error: {self.tool_name} (Command: {current_command}) failed after {self.max_retries + 1} attempts with params={applied_params}"

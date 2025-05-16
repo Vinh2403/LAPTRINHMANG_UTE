@@ -1,3 +1,4 @@
+
 from crewai import Agent, Crew, Process, Task
 from tools.custom_tool import ReconTool
 from langchain_openai import ChatOpenAI
@@ -25,10 +26,10 @@ class ReconCrew:
             api_key=api_key,
             base_url="https://api.deepseek.com",
             model="deepseek/deepseek-chat",
-            temperature=0.3
+            temperature=0.4
         )
 
-        self.required_tools = ["whois", "dnsrecon", "sublist3r", "nmap", "dirsearch", "whatweb"]
+        self.required_tools = ["whois", "dnsrecon", "sublist3r", "nmap", "dirb", "whatweb"]
         self.check_tools()
 
     def check_tools(self):
@@ -39,7 +40,6 @@ class ReconCrew:
         if missing_tools:
             raise EnvironmentError(f"Missing tools: {', '.join(missing_tools)}. Please install them.")
 
-    # --- AGENTS ---
     def whois_agent(self) -> Agent:
         return Agent(
             role="WHOIS Information Specialist",
@@ -150,23 +150,23 @@ If the scan fails, suggest retries with slower scan speed (e.g., -T3) or additio
         return Agent(
             role="Web Directory Enumeration Specialist",
             goal=f"""
-Enumerate directories and files on https://{self.target_url} to identify sensitive paths (e.g., admin panels, backup files, configuration files).
+Enumerate directories and files on http://{self.target_url} to identify sensitive paths (e.g., admin panels, backup files, configuration files) using a high-performance scan configuration.
 Include all discovered paths, their HTTP status codes, and response sizes.
 Assess the risk of each finding (e.g., exposed /admin = critical risk).
 Include raw tool output.
-If enumeration fails, suggest retries with fewer threads (e.g., --threads=3), shorter delays (e.g., --delay=250), or limited recursion (e.g., --recursion-depth=1).
+If enumeration fails, retry with longer delays (e.g., -z 200).
 """,
-            backstory="Expert in web directory enumeration, skilled at identifying high-risk paths and adjusting tool parameters to bypass rate-limiting.",
+            backstory="Expert in web directory enumeration, skilled at identifying high-risk paths and optimizing tool parameters for speed while bypassing rate-limiting.",
             verbose=True,
             llm=self.llm,
             tools=[
                 ReconTool(
                     name="Directory Enumeration",
-                    description=f"Enumerates directories on a web server at https://{self.target_url}.",
-                    command="dirsearch -u https://{target} -w  wordlists/small.txt -o {output_file}",
+                    description=f"Enumerates directories on a web server at http://{self.target_url}.",
+                    command="dirb http://{target} wordlists/small.txt -o {output_file} -X .php,.asp,.aspx,.html,.txt,.bak -z 50",
                     tool_name="Directory Enumeration",
                     writes_to_file=True,
-                    output_file_template="dirsearch_output_{target}.txt"
+                    output_file_template="dirb_output_{target}.txt"
                 )
             ],
             allow_delegation=False
@@ -176,7 +176,7 @@ If enumeration fails, suggest retries with fewer threads (e.g., --threads=3), sh
         return Agent(
             role="Technology Stack Analyst",
             goal=f"""
-Identify the technology stack (web server, frameworks, CMS, libraries) for https://{self.target_url} using customizable aggression levels.
+Identify the technology stack (web server, frameworks, CMS, libraries) for http://{self.target_url} using customizable aggression levels.
 Include all detected technologies, versions, and metadata (e.g., IP address, meta-author).
 Correlate findings with known vulnerabilities (e.g., WordPress 5.8.1 has specific CVEs) using tool outputs or well-known vulnerability data.
 Assess the risk of each technology (e.g., outdated CMS = high risk).
@@ -189,8 +189,8 @@ If the scan fails, suggest retries with a lower aggression level (e.g., -a 1).
             tools=[
                 ReconTool(
                     name="WhatWeb Scan",
-                    description=f"Identifies technologies used by the website https://{self.target_url} with customizable aggression.",
-                    command="whatweb -a 3 https://{target}",
+                    description=f"Identifies technologies used by the website http://{self.target_url} with customizable aggression.",
+                    command="whatweb -a 3 http://{target}",
                     tool_name="WhatWeb Scan"
                 )
             ],
@@ -213,7 +213,7 @@ Perform the following:
 - Include detailed findings for each task, preserving all raw tool outputs (e.g., Nmap SSL SANs, WhatWeb metadata, dnsrecon JSON) and agent analyses.
 - Correlate data across tasks (e.g., if Subdomain Agent finds 'dev.{self.target_url}', recommend Port Scan and Directory scans).
 - Identify vulnerabilities and misconfigurations, assigning risk levels (low, medium, high, critical) with justifications (e.g., exposed admin panel = critical).
-- Review task failures (e.g., timeouts, errors) and suggest retries with adjusted parameters (e.g., Nmap -T3, dirsearch --threads=3).
+- Review task failures (e.g., timeouts, errors) and suggest retries with adjusted parameters (e.g., Nmap -T3, dirb -z 1000).
 - Provide actionable recommendations to mitigate risks (e.g., secure subdomains, patch software).
 - Structure the report in clear Markdown format with sections for executive summary, detailed findings (including raw outputs), correlations, risk matrix, and recommendations.
 Use context from all previous tasks to ensure completeness.
@@ -225,8 +225,8 @@ Use context from all previous tasks to ensure completeness.
             allow_delegation=False
         )
 
-    # --- TASKS ---
-    def whois_task(self, agent: Agent) -> Task:
+    def whois_task(self) -> Task:
+        agent = self.whois_agent()
         return Task(
             description=f"""
 Execute a WHOIS lookup for '{self.target_url}'.
@@ -247,7 +247,8 @@ A detailed summary of WHOIS information for {self.target_url}, including:
 """
         )
 
-    def dns_task(self, agent: Agent) -> Task:
+    def dns_task(self) -> Task:
+        agent = self.dns_agent()
         return Task(
             description=f"""
 Enumerate DNS records for '{self.target_url}' using dnsrecon with JSON output, including zone transfer attempts and SRV records.
@@ -266,10 +267,11 @@ A detailed list of DNS records for {self.target_url} from JSON output, including
 - Raw tool output
 - Retry suggestions for failures
 """,
-            context=[self.whois_task(self.whois_agent())]
+            context=[self.whois_task()]
         )
 
-    def subdomain_task(self, agent: Agent) -> Task:
+    def subdomain_task(self) -> Task:
+        agent = self.subdomain_agent()
         return Task(
             description=f"""
 Discover all publicly accessible subdomains for '{self.target_url}'.
@@ -289,10 +291,11 @@ A comprehensive list of subdomains for {self.target_url}, including:
 - Raw tool output
 - Retry suggestions for failures
 """,
-            context=[self.dns_task(self.dns_agent())]
+            context=[self.dns_task()]
         )
 
-    def port_scan_task(self, agent: Agent) -> Task:
+    def port_scan_task(self) -> Task:
+        agent = self.port_scan_agent()
         return Task(
             description=f"""
 Conduct a port scan on '{self.target_url}' for the top 100 TCP ports.
@@ -315,34 +318,36 @@ Comprehensive port scan results for {self.target_url}, including:
 - Raw tool output
 - Retry suggestions for failures
 """,
-            context=[self.subdomain_task(self.subdomain_agent())]
+            context=[self.subdomain_task()]
         )
 
-    def directory_task(self, agent: Agent) -> Task:
+    def directory_task(self) -> Task:
+        agent = self.directory_agent()
         return Task(
             description=f"""
-Enumerate directories and files for 'https://{self.target_url}' with limited recursion.
+Enumerate directories and files for 'http://{self.target_url}' with limited recursion.
 Identify sensitive paths (e.g., admin panels, backup files, configuration files).
 Include HTTP status codes and response sizes.
 Assess the risk of each finding (e.g., exposed /admin = critical risk).
 Include raw tool output.
-If enumeration fails, suggest retries with adjusted parameters (e.g., fewer threads, shorter delays).
+If enumeration fails, retry with longer delays (e.g., -z 1000).
 """,
             agent=agent,
             expected_output=f"""
-A detailed list of directories and files on https://{self.target_url}, including:
+A detailed list of directories and files on http://{self.target_url}, including:
 - HTTP status codes and response sizes
 - Sensitive paths with risk levels
 - Raw tool output
 - Retry suggestions for failures
 """,
-            context=[self.tech_stack_task(self.tech_stack_agent())]
+            context=[self.tech_stack_task()]
         )
 
-    def tech_stack_task(self, agent: Agent) -> Task:
+    def tech_stack_task(self) -> Task:
+        agent = self.tech_stack_agent()
         return Task(
             description=f"""
-Identify the technology stack for 'https://{self.target_url}' (web server, frameworks, CMS, libraries) using customizable aggression levels.
+Identify the technology stack for 'http://{self.target_url}' (web server, frameworks, CMS, libraries) using customizable aggression levels.
 Include all detected technologies, versions, and metadata (e.g., IP address, meta-author).
 Correlate findings with known vulnerabilities using tool outputs or well-known vulnerability data.
 Assess the risk of each technology (e.g., outdated CMS = high risk).
@@ -351,7 +356,7 @@ If the scan fails, suggest retries with a lower aggression level (e.g., -a 1).
 """,
             agent=agent,
             expected_output=f"""
-A comprehensive list of technologies and versions for https://{self.target_url}, including:
+A comprehensive list of technologies and versions for http://{self.target_url}, including:
 - Metadata
 - Known vulnerabilities
 - Risk levels
@@ -360,7 +365,8 @@ A comprehensive list of technologies and versions for https://{self.target_url},
 """
         )
 
-    def reporting_task(self, agent: Agent, all_tasks: List[Task]) -> Task:
+    def reporting_task(self, all_tasks: List[Task]) -> Task:
+        agent = self.reporting_agent()
         return Task(
             description=f"""
 Compile a comprehensive report for '{self.target_url}' synthesizing all reconnaissance data from:
@@ -375,7 +381,7 @@ Perform the following:
 - Include detailed findings for each task, preserving all raw tool outputs (e.g., Nmap SSL SANs, WhatWeb metadata, dnsrecon JSON) and agent analyses.
 - Correlate data across tasks (e.g., match Subdomain Agent's 'dev.{self.target_url}' with Port Scan Agent's open ports).
 - Identify vulnerabilities and misconfigurations, assigning risk levels (low, medium, high, critical) with detailed justifications.
-- Review task failures and suggest retries with specific parameters (e.g., Nmap -T3, dirsearch --threads=3).
+- Review task failures and suggest retries with specific parameters (e.g., Nmap -T3, dirb -z 1000).
 - Provide actionable recommendations to mitigate risks (e.g., secure subdomains, implement DMARC, patch software).
 - Structure the report in Markdown with sections: Executive Summary, Detailed Findings (with raw outputs), Data Correlations, Risk Prioritization Matrix, Recommendations, and Retry Suggestions.
 Use context from all previous tasks to ensure no data is omitted.
@@ -395,20 +401,12 @@ A comprehensive Markdown report for {self.target_url}, including:
 
     def create_crew(self) -> Crew:
         """Creates the Reconnaissance crew"""
-        _whois_agent = self.whois_agent()
-        _dns_agent = self.dns_agent()
-        _subdomain_agent = self.subdomain_agent()
-        _port_scan_agent = self.port_scan_agent()
-        _directory_agent = self.directory_agent()
-        _tech_stack_agent = self.tech_stack_agent()
-        _reporting_agent = self.reporting_agent()
-
-        task_whois = self.whois_task(_whois_agent)
-        task_dns = self.dns_task(_dns_agent)
-        task_subdomain = self.subdomain_task(_subdomain_agent)
-        task_tech_stack = self.tech_stack_task(_tech_stack_agent)
-        task_port_scan = self.port_scan_task(_port_scan_agent)
-        task_directory = self.directory_task(_directory_agent)
+        task_whois = self.whois_task()
+        task_dns = self.dns_task()
+        task_subdomain = self.subdomain_task()
+        task_tech_stack = self.tech_stack_task()
+        task_port_scan = self.port_scan_task()
+        task_directory = self.directory_task()
 
         recon_tasks = [
             task_whois,
@@ -419,19 +417,19 @@ A comprehensive Markdown report for {self.target_url}, including:
             task_directory
         ]
 
-        task_report = self.reporting_task(_reporting_agent, recon_tasks)
+        task_report = self.reporting_task(recon_tasks)
 
         all_crew_tasks = recon_tasks + [task_report]
 
         return Crew(
             agents=[
-                _whois_agent,
-                _dns_agent,
-                _subdomain_agent,
-                _tech_stack_agent,
-                _port_scan_agent,
-                _directory_agent,
-                _reporting_agent
+                self.whois_agent(),
+                self.dns_agent(),
+                self.subdomain_agent(),
+                self.tech_stack_agent(),
+                self.port_scan_agent(),
+                self.directory_agent(),
+                self.reporting_agent()
             ],
             tasks=all_crew_tasks,
             process=Process.sequential,

@@ -29,9 +29,9 @@ def run():
             raise ValueError(f"Could not extract a valid domain from: {raw_target_input}")
         print(f"Normalized target domain: {domain}")
 
-        # Optional: Allow user to specify custom tool parameters
-        custom_params_input = input("Enter custom tool parameters as JSON (e.g., {\"dirsearch_threads\": \"5\"}) or press Enter to use defaults: ").strip()
-        custom_params = json.loads(custom_params_input) if custom_params_input else {}
+        
+        # custom_params_input = input("Enter custom tool parameters as JSON (e.g., {\"dirsearch_threads\": \"5\"}) or press Enter to use defaults: ").strip()
+        # custom_params = json.loads(custom_params_input) if custom_params_input else {}
 
         recon_crew_instance = ReconCrew(domain)
         crew = recon_crew_instance.create_crew()

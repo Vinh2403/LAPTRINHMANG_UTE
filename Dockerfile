@@ -16,12 +16,12 @@ RUN apt-get update && apt-get install -y \
     nmap \
     whatweb \
     git \
+    dirb \                 
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python tools via pip
 RUN pip3 install --no-cache-dir \
     sublist3r==1.0 \
-    dirsearch==0.4.3 \
     python-whois==0.9.4 \
     python-nmap==0.7.1
 
@@ -41,4 +41,3 @@ ENV DEEPSEEK_API_KEY=""
 ENV PYTHONPATH=/app/src
 
 # Command to run the agent
-
